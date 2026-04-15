@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'screens/splash_screen.dart';
 import 'providers/app_provider.dart';
+import 'theme/app_theme.dart';
 
 void main() {
   runApp(
@@ -20,13 +21,7 @@ class SustainGrowApp extends StatelessWidget {
     return MaterialApp(
       title: 'SustainGrow',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF2D6A4F),
-          brightness: Brightness.light,
-        ),
-        useMaterial3: true,
-      ),
+      theme: AppTheme.themeData,
       home: const SplashScreen(),
     );
   }
