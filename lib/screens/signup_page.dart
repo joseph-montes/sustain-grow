@@ -54,20 +54,43 @@ class _SignupPageState extends State<SignupPage>
     if (!_formKey.currentState!.validate()) return;
     if (!_agreeToTerms) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please agree to terms and conditions'),
+        SnackBar(
+          content: const Text('Please agree to the Terms & Privacy Policy'),
           backgroundColor: AppTheme.warningOrange,
+          behavior: SnackBarBehavior.floating,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         ),
       );
       return;
     }
+
     setState(() => _isLoading = true);
-    await Future.delayed(const Duration(milliseconds: 1400));
+
+    final provider = context.read<AppProvider>();
+    final error = await provider.signUp(
+      name: _nameController.text.trim(),
+      email: _emailController.text.trim(),
+      password: _passwordController.text,
+    );
+
     if (!mounted) return;
-    context.read<AppProvider>().login(
-          _nameController.text.trim(),
-          _emailController.text.trim(),
-        );
+    setState(() => _isLoading = false);
+
+    if (error != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(error),
+          backgroundColor: AppTheme.warningOrange,
+          behavior: SnackBarBehavior.floating,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        ),
+      );
+      return;
+    }
+
+    // Navigate to home on success
     Navigator.of(context).pushAndRemoveUntil(
       PageRouteBuilder(
         pageBuilder: (_, __, ___) => const HomeScreen(),
@@ -89,7 +112,7 @@ class _SignupPageState extends State<SignupPage>
           height: size.height,
           child: Column(
             children: [
-              // ── Hero Header ────────────────────────────────────────────────
+              // ── Hero Header ───────────────────────────────────────────────
               Container(
                 height: size.height * 0.26,
                 width: double.infinity,
@@ -146,7 +169,7 @@ class _SignupPageState extends State<SignupPage>
                 ),
               ),
 
-              // ── Signup Form ────────────────────────────────────────────────
+              // ── Signup Form ───────────────────────────────────────────────
               Expanded(
                 child: SlideTransition(
                   position: _slideAnim,
@@ -162,7 +185,8 @@ class _SignupPageState extends State<SignupPage>
                             const Text('Join SustainGrow 🌱',
                                 style: AppTheme.heading1),
                             const SizedBox(height: 4),
-                            const Text('Start your sustainable farming journey',
+                            const Text(
+                                'Start your sustainable farming journey',
                                 style: AppTheme.bodyLarge),
                             const SizedBox(height: 20),
 
@@ -177,9 +201,10 @@ class _SignupPageState extends State<SignupPage>
                                 prefixIcon: Icon(Icons.person_outline,
                                     color: AppTheme.textMuted),
                               ),
-                              validator: (v) => v == null || v.trim().isEmpty
-                                  ? 'Full name is required'
-                                  : null,
+                              validator: (v) =>
+                                  v == null || v.trim().isEmpty
+                                      ? 'Full name is required'
+                                      : null,
                             ),
                             const SizedBox(height: 12),
 
@@ -194,9 +219,10 @@ class _SignupPageState extends State<SignupPage>
                                 prefixIcon: Icon(Icons.email_outlined,
                                     color: AppTheme.textMuted),
                               ),
-                              validator: (v) => v == null || !v.contains('@')
-                                  ? 'Enter a valid email'
-                                  : null,
+                              validator: (v) =>
+                                  v == null || !v.contains('@')
+                                      ? 'Enter a valid email'
+                                      : null,
                             ),
                             const SizedBox(height: 12),
 
@@ -294,8 +320,8 @@ class _SignupPageState extends State<SignupPage>
                                   shape: const RoundedRectangleBorder(
                                     borderRadius: AppTheme.buttonRadius,
                                   ),
-                                  padding:
-                                      const EdgeInsets.symmetric(vertical: 16),
+                                  padding: const EdgeInsets.symmetric(
+                                      vertical: 16),
                                   elevation: 0,
                                 ),
                                 child: _isLoading
@@ -323,8 +349,8 @@ class _SignupPageState extends State<SignupPage>
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
                                 const Text('Already have an account? ',
-                                    style:
-                                        TextStyle(color: AppTheme.textSecondary)),
+                                    style: TextStyle(
+                                        color: AppTheme.textSecondary)),
                                 GestureDetector(
                                   onTap: () => Navigator.pop(context),
                                   child: const Text(

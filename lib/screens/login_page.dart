@@ -12,7 +12,8 @@ class LoginPage extends StatefulWidget {
   State<LoginPage> createState() => _LoginPageState();
 }
 
-class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMixin {
+class _LoginPageState extends State<LoginPage>
+    with SingleTickerProviderStateMixin {
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
@@ -47,20 +48,68 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
   Future<void> _login() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _isLoading = true);
-    await Future.delayed(const Duration(milliseconds: 1200));
+
+    final provider = context.read<AppProvider>();
+    final error = await provider.signIn(
+      email: _emailController.text.trim(),
+      password: _passwordController.text,
+    );
+
     if (!mounted) return;
-    // Simulate login — replace with Firebase Auth when google-services.json is provided
-    final name = _emailController.text.split('@').first;
-    context.read<AppProvider>().login(
-          name[0].toUpperCase() + name.substring(1),
-          _emailController.text.trim(),
-        );
+    setState(() => _isLoading = false);
+
+    if (error != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(error),
+          backgroundColor: AppTheme.warningOrange,
+          behavior: SnackBarBehavior.floating,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        ),
+      );
+      return;
+    }
+
+    // Navigate to home on success
     Navigator.of(context).pushReplacement(
       PageRouteBuilder(
         pageBuilder: (_, __, ___) => const HomeScreen(),
         transitionsBuilder: (_, animation, __, child) =>
             FadeTransition(opacity: animation, child: child),
         transitionDuration: const Duration(milliseconds: 500),
+      ),
+    );
+  }
+
+  Future<void> _forgotPassword() async {
+    final email = _emailController.text.trim();
+    if (email.isEmpty || !email.contains('@')) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content:
+              const Text('Enter your email address above first.'),
+          backgroundColor: AppTheme.warningOrange,
+          behavior: SnackBarBehavior.floating,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        ),
+      );
+      return;
+    }
+
+    final provider = context.read<AppProvider>();
+    final error = await provider.sendPasswordReset(email);
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(error ?? 'Password reset email sent to $email'),
+        backgroundColor:
+            error != null ? AppTheme.warningOrange : AppTheme.primaryGreen,
+        behavior: SnackBarBehavior.floating,
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
     );
   }
@@ -75,7 +124,7 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
           height: size.height,
           child: Column(
             children: [
-              // ── Hero Header ────────────────────────────────────────────────
+              // ── Hero Header ───────────────────────────────────────────────
               Container(
                 height: size.height * 0.38,
                 width: double.infinity,
@@ -125,7 +174,7 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
                 ),
               ),
 
-              // ── Login Form ─────────────────────────────────────────────────
+              // ── Login Form ────────────────────────────────────────────────
               Expanded(
                 child: SlideTransition(
                   position: _slideAnim,
@@ -192,7 +241,7 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
                             Align(
                               alignment: Alignment.centerRight,
                               child: TextButton(
-                                onPressed: () {},
+                                onPressed: _forgotPassword,
                                 style: TextButton.styleFrom(
                                     foregroundColor: AppTheme.primaryGreen),
                                 child: const Text('Forgot password?'),
@@ -210,8 +259,8 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
                                   shape: const RoundedRectangleBorder(
                                     borderRadius: AppTheme.buttonRadius,
                                   ),
-                                  padding:
-                                      const EdgeInsets.symmetric(vertical: 16),
+                                  padding: const EdgeInsets.symmetric(
+                                      vertical: 16),
                                   elevation: 0,
                                 ),
                                 child: _isLoading

@@ -1,11 +1,23 @@
 import 'package:flutter/foundation.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
+import 'package:firebase_auth/firebase_auth.dart';
+import '../models/user_model.dart';
+import '../services/auth_service.dart';
+import '../services/firestore_service.dart';
 
 class AppProvider with ChangeNotifier {
-  static const String baseUrl = 'YOUR_BACKEND_URL_HERE/api';
+  // ── Services ──────────────────────────────────────────────────────────────────
+  final AuthService _authService = AuthService();
+  final FirestoreService _firestoreService = FirestoreService();
 
-  // ── Data State ───────────────────────────────────────────────────────────────
+  // ── Auth / User ───────────────────────────────────────────────────────────────
+  UserModel? currentUser;
+  bool get isLoggedIn => currentUser != null;
+
+  // ── Loading / Error ───────────────────────────────────────────────────────────
+  bool isLoading = false;
+  String? error;
+
+  // ── Data State ────────────────────────────────────────────────────────────────
   Map<String, dynamic>? dashboardStats;
   List<dynamic> crops = [];
   List<dynamic> alerts = [];
@@ -13,24 +25,38 @@ class AppProvider with ChangeNotifier {
   List<dynamic> products = [];
   List<dynamic> posts = [];
 
-  bool isLoading = false;
-  String? error;
-
-  // ── Auth State ───────────────────────────────────────────────────────────────
-  bool isLoggedIn = false;
-  Map<String, dynamic>? currentUser;
   bool _seedLoaded = false;
 
-  void login(String name, String email) {
-    currentUser = {'name': name, 'email': email};
-    isLoggedIn = true;
+  // ── Constructor: listen to Firebase auth changes ──────────────────────────────
+  AppProvider() {
+    _authService.authStateChanges.listen(_onAuthStateChanged);
+  }
+
+  Future<void> _onAuthStateChanged(User? firebaseUser) async {
+    if (firebaseUser == null) {
+      currentUser = null;
+      _clearData();
+      notifyListeners();
+      return;
+    }
+
+    // Load user profile from Firestore
+    final userData = await _firestoreService.getUser(firebaseUser.uid);
+    if (userData != null) {
+      currentUser = UserModel.fromMap({'uid': firebaseUser.uid, ...userData});
+    } else {
+      // Fallback: build from Firebase Auth user
+      currentUser = UserModel(
+        uid: firebaseUser.uid,
+        name: firebaseUser.displayName ?? firebaseUser.email!.split('@').first,
+        email: firebaseUser.email ?? '',
+      );
+    }
     notifyListeners();
     _loadAllData();
   }
 
-  void logout() {
-    currentUser = null;
-    isLoggedIn = false;
+  void _clearData() {
     dashboardStats = null;
     crops = [];
     alerts = [];
@@ -38,12 +64,87 @@ class AppProvider with ChangeNotifier {
     products = [];
     posts = [];
     _seedLoaded = false;
-    notifyListeners();
   }
+
+  // ── Auth Actions ──────────────────────────────────────────────────────────────
+
+  /// Sign up → saves user in Firestore → auth-state listener fires _onAuthStateChanged
+  Future<String?> signUp({
+    required String name,
+    required String email,
+    required String password,
+  }) async {
+    isLoading = true;
+    error = null;
+    notifyListeners();
+    try {
+      await _authService.signUp(name: name, email: email, password: password);
+      isLoading = false;
+      notifyListeners();
+      return null; // success
+    } on FirebaseAuthException catch (e) {
+      error = _friendlyAuthError(e.code);
+      isLoading = false;
+      notifyListeners();
+      return error;
+    } catch (e) {
+      error = 'An unexpected error occurred.';
+      isLoading = false;
+      notifyListeners();
+      return error;
+    }
+  }
+
+  /// Sign in with email + password
+  Future<String?> signIn({
+    required String email,
+    required String password,
+  }) async {
+    isLoading = true;
+    error = null;
+    notifyListeners();
+    try {
+      await _authService.signIn(email: email, password: password);
+      isLoading = false;
+      notifyListeners();
+      return null; // success
+    } on FirebaseAuthException catch (e) {
+      error = _friendlyAuthError(e.code);
+      isLoading = false;
+      notifyListeners();
+      return error;
+    } catch (e) {
+      error = 'An unexpected error occurred.';
+      isLoading = false;
+      notifyListeners();
+      return error;
+    }
+  }
+
+  Future<void> signOut() async {
+    await _authService.signOut();
+  }
+
+  /// Send a password-reset e-mail
+  Future<String?> sendPasswordReset(String email) async {
+    try {
+      await _authService.sendPasswordReset(email);
+      return null;
+    } on FirebaseAuthException catch (e) {
+      return _friendlyAuthError(e.code);
+    }
+  }
+
+  // ── Data Loading ──────────────────────────────────────────────────────────────
 
   Future<void> _loadAllData() async {
     if (_seedLoaded) return;
     _seedLoaded = true;
+
+    // Seed marketplace products to Firestore if empty
+    await _firestoreService.seedProductsIfEmpty(
+        _mockProducts.cast<Map<String, dynamic>>());
+
     await fetchDashboardStats();
     await fetchAlerts();
     await fetchCrops();
@@ -52,7 +153,161 @@ class AppProvider with ChangeNotifier {
     await fetchCommunityPosts();
   }
 
-  // ── Mock Data ────────────────────────────────────────────────────────────────
+  Future<void> fetchDashboardStats() async {
+    isLoading = true;
+    notifyListeners();
+    // Derive stats from user farm data; fall back to mock while real data loads
+    if (currentUser != null && currentUser!.farm.isNotEmpty) {
+      final farm = currentUser!.farm;
+      dashboardStats = {
+        'sustainability_score': farm['sustainabilityScore'] ?? 78,
+        'total_crops': farm['totalCrops'] ?? crops.length,
+        'healthy_crops': crops.where((c) =>
+            c['health_status'] == 'good' ||
+            c['health_status'] == 'excellent').length,
+        'alerts_count': alerts.length,
+        'total_area_hectares': farm['totalAreaHectares'] ?? 15.5,
+        'water_usage_liters': farm['waterUsageLiters'] ?? 12400,
+        'carbon_saved_kg': farm['carbonSavedKg'] ?? 320,
+      };
+    } else {
+      dashboardStats = _mockDashboard;
+    }
+    isLoading = false;
+    notifyListeners();
+  }
+
+  Future<void> fetchAlerts() async {
+    // Alerts are static / advisory for now; can wire to Firestore later
+    alerts = _mockAlerts;
+    notifyListeners();
+  }
+
+  Future<void> fetchCrops() async {
+    if (currentUser == null) {
+      crops = _mockCrops;
+      notifyListeners();
+      return;
+    }
+    // Subscribe to real-time Firestore crops; convert stream to one-shot list
+    try {
+      final snap = await _firestoreService
+          .cropsStream(currentUser!.uid)
+          .first
+          .timeout(const Duration(seconds: 6));
+      crops = snap.isEmpty ? _mockCrops : snap;
+    } catch (_) {
+      crops = _mockCrops;
+    }
+    notifyListeners();
+  }
+
+  Future<void> fetchWeather() async {
+    weather = _mockWeather;
+    notifyListeners();
+  }
+
+  Future<void> fetchProducts() async {
+    try {
+      final snap = await _firestoreService
+          .productsStream()
+          .first
+          .timeout(const Duration(seconds: 6));
+      products = snap.isEmpty ? _mockProducts : snap;
+    } catch (_) {
+      products = _mockProducts;
+    }
+    notifyListeners();
+  }
+
+  Future<void> fetchCommunityPosts() async {
+    try {
+      final snap = await _firestoreService
+          .communityPostsStream()
+          .first
+          .timeout(const Duration(seconds: 6));
+      posts = snap.isEmpty ? _mockPosts : snap;
+    } catch (_) {
+      posts = _mockPosts;
+    }
+    notifyListeners();
+  }
+
+  // ── Crop CRUD ─────────────────────────────────────────────────────────────────
+
+  Future<void> addCrop(Map<String, dynamic> crop) async {
+    if (currentUser == null) return;
+    await _firestoreService.addCrop(currentUser!.uid, crop);
+    await fetchCrops();
+  }
+
+  Future<void> updateCrop(String cropId, Map<String, dynamic> data) async {
+    if (currentUser == null) return;
+    await _firestoreService.updateCrop(currentUser!.uid, cropId, data);
+    await fetchCrops();
+  }
+
+  Future<void> deleteCrop(String cropId) async {
+    if (currentUser == null) return;
+    await _firestoreService.deleteCrop(currentUser!.uid, cropId);
+    await fetchCrops();
+  }
+
+  // ── Post Interactions ─────────────────────────────────────────────────────────
+
+  Future<void> togglePostLike(dynamic postId) async {
+    final idx = posts.indexWhere((p) => p['id'] == postId);
+    if (idx == -1) return;
+    final post = Map<String, dynamic>.from(posts[idx] as Map);
+    final liked = post['liked'] as bool? ?? false;
+    final likes = post['likes'] as int? ?? 0;
+
+    // Optimistic local update
+    post['liked'] = !liked;
+    post['likes'] = liked ? likes - 1 : likes + 1;
+    posts[idx] = post;
+    notifyListeners();
+
+    // Push to Firestore if post has a real Firestore id (String)
+    if (postId is String) {
+      try {
+        await _firestoreService.togglePostLike(postId, liked, likes);
+      } catch (_) {/* silent fallback to local state */}
+    }
+  }
+
+  Future<void> addCommunityPost(Map<String, dynamic> post) async {
+    await _firestoreService.addPost(post);
+    await fetchCommunityPosts();
+  }
+
+  // ── Helpers ───────────────────────────────────────────────────────────────────
+
+  String _friendlyAuthError(String code) {
+    switch (code) {
+      case 'email-already-in-use':
+        return 'An account already exists with that email.';
+      case 'invalid-email':
+        return 'Please enter a valid email address.';
+      case 'weak-password':
+        return 'Password must be at least 6 characters.';
+      case 'user-not-found':
+      case 'wrong-password':
+      case 'invalid-credential':
+        return 'Invalid email or password. Please try again.';
+      case 'user-disabled':
+        return 'This account has been disabled.';
+      case 'too-many-requests':
+        return 'Too many failed attempts. Please try again later.';
+      case 'network-request-failed':
+        return 'No internet connection. Please check your network.';
+      default:
+        return 'Authentication failed. Please try again.';
+    }
+  }
+
+  // ── Mock Data (fallback when Firestore is empty) ──────────────────────────────
+
   static Map<String, dynamic> get _mockDashboard => {
         'sustainability_score': 78,
         'total_crops': 4,
@@ -89,7 +344,7 @@ class AppProvider with ChangeNotifier {
 
   static List<dynamic> get _mockCrops => [
         {
-          'id': 1,
+          'id': '1',
           'name': 'Rice – Jasmine Variety',
           'type': 'Cereal',
           'health_status': 'good',
@@ -103,7 +358,7 @@ class AppProvider with ChangeNotifier {
           'growth_stage': 'Tillering',
         },
         {
-          'id': 2,
+          'id': '2',
           'name': 'Yellow Corn',
           'type': 'Cereal',
           'health_status': 'excellent',
@@ -117,7 +372,7 @@ class AppProvider with ChangeNotifier {
           'growth_stage': 'Maturation',
         },
         {
-          'id': 3,
+          'id': '3',
           'name': 'Tomatoes',
           'type': 'Vegetable',
           'health_status': 'fair',
@@ -131,7 +386,7 @@ class AppProvider with ChangeNotifier {
           'growth_stage': 'Flowering',
         },
         {
-          'id': 4,
+          'id': '4',
           'name': 'Sweet Potato',
           'type': 'Root Crop',
           'health_status': 'good',
@@ -229,7 +484,6 @@ class AppProvider with ChangeNotifier {
 
   static List<dynamic> get _mockProducts => [
         {
-          'id': 1,
           'name': 'Organic Fertiliser 50kg',
           'price': 850,
           'original_price': 1050,
@@ -239,10 +493,10 @@ class AppProvider with ChangeNotifier {
           'rating': 4.7,
           'sold': 234,
           'in_stock': true,
-          'description': 'High-quality organic fertiliser rich in nitrogen and potassium. Suitable for all crop types.',
+          'description':
+              'High-quality organic fertiliser rich in nitrogen and potassium.',
         },
         {
-          'id': 2,
           'name': 'Heirloom Rice Seeds 5kg',
           'price': 320,
           'original_price': null,
@@ -252,10 +506,10 @@ class AppProvider with ChangeNotifier {
           'rating': 4.9,
           'sold': 88,
           'in_stock': true,
-          'description': 'Traditional Philippine heirloom variety. High germination rate, drought-tolerant.',
+          'description':
+              'Traditional Philippine heirloom variety. High germination rate, drought-tolerant.',
         },
         {
-          'id': 3,
           'name': 'Drip Irrigation Kit',
           'price': 2400,
           'original_price': 3200,
@@ -265,10 +519,10 @@ class AppProvider with ChangeNotifier {
           'rating': 4.5,
           'sold': 45,
           'in_stock': true,
-          'description': 'Complete drip irrigation system for up to 1 hectare. Reduces water use by 60%.',
+          'description':
+              'Complete drip irrigation system for up to 1 hectare. Reduces water use by 60%.',
         },
         {
-          'id': 4,
           'name': 'Compost Activator',
           'price': 180,
           'original_price': null,
@@ -278,10 +532,9 @@ class AppProvider with ChangeNotifier {
           'rating': 4.3,
           'sold': 312,
           'in_stock': false,
-          'description': 'Accelerates compost decomposition by 3x. Natural microbial formula.',
+          'description': 'Accelerates compost decomposition by 3x.',
         },
         {
-          'id': 5,
           'name': 'Solar Soil Sensor Kit',
           'price': 1850,
           'original_price': null,
@@ -291,10 +544,10 @@ class AppProvider with ChangeNotifier {
           'rating': 4.6,
           'sold': 19,
           'in_stock': true,
-          'description': 'Monitor soil moisture, pH, and temperature wirelessly over your field.',
+          'description':
+              'Monitor soil moisture, pH, and temperature wirelessly over your field.',
         },
         {
-          'id': 6,
           'name': 'Neem Oil Pesticide 1L',
           'price': 250,
           'original_price': 290,
@@ -304,167 +557,63 @@ class AppProvider with ChangeNotifier {
           'rating': 4.8,
           'sold': 567,
           'in_stock': true,
-          'description': 'Cold-pressed neem oil. Organic, safe for beneficial insects. Effective against 200+ pests.',
+          'description':
+              'Cold-pressed neem oil. Organic, safe for beneficial insects.',
         },
       ];
 
   static List<dynamic> get _mockPosts => [
         {
-          'id': 1,
+          'id': '1',
           'author': 'Maria Santos',
           'author_avatar': 'MS',
           'category': 'tip',
           'title': 'Natural Pest Control Using Neem Oil',
           'content':
-              'I have been using neem oil spray for three seasons now and it has dramatically reduced pest damage without harming beneficial insects. Mix 5ml neem oil with 1L water and a drop of dish soap.',
+              'I have been using neem oil spray for three seasons now and it has dramatically reduced pest damage without harming beneficial insects.',
           'likes': 48,
           'comments_count': 12,
           'time': '2 hours ago',
           'liked': false,
         },
         {
-          'id': 2,
+          'id': '2',
           'author': 'Juan dela Cruz',
           'author_avatar': 'JC',
           'category': 'question',
           'title': 'Best time to plant corn in Visayas?',
           'content':
-              'I am planning to start my corn plantation next month. Is October still a good time considering the rains? Would love advice from experienced farmers in the region.',
+              'I am planning to start my corn plantation next month. Is October still a good time considering the rains?',
           'likes': 21,
           'comments_count': 9,
           'time': '5 hours ago',
           'liked': false,
         },
         {
-          'id': 3,
+          'id': '3',
           'author': 'Rosa Mendez',
           'author_avatar': 'RM',
           'category': 'success',
           'title': 'First organic certification achieved!',
           'content':
-              'After 2 years of transitioning, our 4-hectare farm is now officially certified organic. Happy to share our journey and the paperwork process for anyone considering the same path.',
+              'After 2 years of transitioning, our 4-hectare farm is now officially certified organic.',
           'likes': 134,
           'comments_count': 37,
           'time': '1 day ago',
           'liked': true,
         },
         {
-          'id': 4,
+          'id': '4',
           'author': 'Pedro Reyes',
           'author_avatar': 'PR',
           'category': 'tip',
           'title': 'Water-saving irrigation schedule for dry season',
           'content':
-              'During the hot summer months, I switch to early morning (5–7 AM) drip irrigation to reduce evaporation. Paired with mulching, I cut water usage by nearly 40% while maintaining crop health.',
+              'During the hot summer months, I switch to early morning drip irrigation to reduce evaporation.',
           'likes': 67,
           'comments_count': 22,
           'time': '2 days ago',
           'liked': false,
         },
       ];
-
-  // ── Fetch Methods ────────────────────────────────────────────────────────────
-  Future<void> fetchDashboardStats() async {
-    isLoading = true;
-    notifyListeners();
-    try {
-      final response = await http
-          .get(Uri.parse('$baseUrl/dashboard/stats'))
-          .timeout(const Duration(seconds: 5));
-      if (response.statusCode == 200) {
-        dashboardStats = json.decode(response.body);
-        isLoading = false;
-        notifyListeners();
-        return;
-      }
-    } catch (_) {}
-    dashboardStats = _mockDashboard;
-    isLoading = false;
-    notifyListeners();
-  }
-
-  Future<void> fetchAlerts() async {
-    try {
-      final response = await http
-          .get(Uri.parse('$baseUrl/alerts'))
-          .timeout(const Duration(seconds: 5));
-      if (response.statusCode == 200) {
-        alerts = json.decode(response.body);
-        notifyListeners();
-        return;
-      }
-    } catch (_) {}
-    alerts = _mockAlerts;
-    notifyListeners();
-  }
-
-  Future<void> fetchCrops() async {
-    try {
-      final response = await http
-          .get(Uri.parse('$baseUrl/crops'))
-          .timeout(const Duration(seconds: 5));
-      if (response.statusCode == 200) {
-        crops = json.decode(response.body);
-        notifyListeners();
-        return;
-      }
-    } catch (_) {}
-    crops = _mockCrops;
-    notifyListeners();
-  }
-
-  Future<void> fetchWeather() async {
-    try {
-      final response = await http
-          .get(Uri.parse('$baseUrl/weather/forecast'))
-          .timeout(const Duration(seconds: 5));
-      if (response.statusCode == 200) {
-        weather = json.decode(response.body);
-        notifyListeners();
-        return;
-      }
-    } catch (_) {}
-    weather = _mockWeather;
-    notifyListeners();
-  }
-
-  Future<void> fetchProducts() async {
-    try {
-      final response = await http
-          .get(Uri.parse('$baseUrl/marketplace/products'))
-          .timeout(const Duration(seconds: 5));
-      if (response.statusCode == 200) {
-        products = json.decode(response.body);
-        notifyListeners();
-        return;
-      }
-    } catch (_) {}
-    products = _mockProducts;
-    notifyListeners();
-  }
-
-  Future<void> fetchCommunityPosts() async {
-    try {
-      final response = await http
-          .get(Uri.parse('$baseUrl/community/posts'))
-          .timeout(const Duration(seconds: 5));
-      if (response.statusCode == 200) {
-        posts = json.decode(response.body);
-        notifyListeners();
-        return;
-      }
-    } catch (_) {}
-    posts = _mockPosts;
-    notifyListeners();
-  }
-
-  void togglePostLike(int postId) {
-    final idx = posts.indexWhere((p) => p['id'] == postId);
-    if (idx == -1) return;
-    final post = Map<String, dynamic>.from(posts[idx] as Map);
-    post['liked'] = !(post['liked'] as bool);
-    post['likes'] = (post['likes'] as int) + (post['liked'] ? 1 : -1);
-    posts[idx] = post;
-    notifyListeners();
-  }
 }

@@ -70,14 +70,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             PopupMenuButton<String>(
                               icon: const Icon(Icons.more_vert,
                                   color: Colors.white),
-                              onSelected: (v) {
+                              onSelected: (v) async {
                                 if (v == 'logout') {
-                                  provider.logout();
-                                  Navigator.of(context).pushAndRemoveUntil(
-                                    MaterialPageRoute(
-                                        builder: (_) => const LoginPage()),
-                                    (route) => false,
-                                  );
+                                  await provider.signOut();
+                                  if (context.mounted) {
+                                    Navigator.of(context).pushAndRemoveUntil(
+                                      MaterialPageRoute(
+                                          builder: (_) => const LoginPage()),
+                                      (route) => false,
+                                    );
+                                  }
                                 }
                               },
                               itemBuilder: (_) => const [
@@ -89,7 +91,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         ),
                         const SizedBox(height: 10),
                         Text(
-                          'Good morning, ${user?['name'] ?? 'Farmer'} 👋',
+                          'Good morning, ${user?.name ?? 'Farmer'} 👋',
                           style: const TextStyle(
                             color: Colors.white,
                             fontSize: 20,
