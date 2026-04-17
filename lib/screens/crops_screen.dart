@@ -52,25 +52,43 @@ class _CropsScreenState extends State<CropsScreen>
         headerSliverBuilder: (_, __) => [
           SliverAppBar(
             pinned: true,
-            expandedHeight: 140,
+            expandedHeight: 170,
             backgroundColor: AppTheme.primaryGreen,
             elevation: 0,
+            // Shown when the bar is fully collapsed (scrolled up)
+            title: const Text(
+              'Crop Monitor',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            // Hide title when expanded (flexibleSpace shows it)
             flexibleSpace: FlexibleSpaceBar(
+              titlePadding: EdgeInsets.zero,
               background: Container(
-                decoration: const BoxDecoration(gradient: AppTheme.heroGradient),
+                decoration: const BoxDecoration(
+                    gradient: AppTheme.heroGradient),
                 child: SafeArea(
                   child: Padding(
+                    // Top padding gives room for the status bar + action row;
+                    // bottom padding keeps text well above the TabBar.
                     padding:
-                        const EdgeInsets.fromLTRB(20, 60, 20, 12),
+                        const EdgeInsets.fromLTRB(20, 56, 20, 56),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       mainAxisAlignment: MainAxisAlignment.end,
                       children: [
-                        const Text('Crop Monitor',
-                            style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 22,
-                                fontWeight: FontWeight.w800)),
+                        const Text(
+                          'Crop Monitor',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 22,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
                         Text(
                           '${provider.crops.length} crops tracked across your farm',
                           style: TextStyle(
@@ -86,18 +104,29 @@ class _CropsScreenState extends State<CropsScreen>
             actions: [
               IconButton(
                 icon: const Icon(Icons.add, color: Colors.white),
+                tooltip: 'Add crop',
                 onPressed: () => _showAddCropSheet(context),
               ),
             ],
-            bottom: TabBar(
-              controller: _tabController,
-              isScrollable: true,
-              indicatorColor: Colors.white,
-              indicatorWeight: 3,
-              labelColor: Colors.white,
-              unselectedLabelColor: Colors.white60,
-              labelStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
-              tabs: _categories.map((c) => Tab(text: c)).toList(),
+            bottom: PreferredSize(
+              preferredSize: const Size.fromHeight(48),
+              child: Container(
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryGreen.withOpacity(0.15),
+                ),
+                child: TabBar(
+                  controller: _tabController,
+                  isScrollable: true,
+                  indicatorColor: Colors.white,
+                  indicatorWeight: 3,
+                  labelColor: Colors.white,
+                  unselectedLabelColor: Colors.white60,
+                  labelStyle: const TextStyle(
+                      fontWeight: FontWeight.w700, fontSize: 13),
+                  tabs:
+                      _categories.map((c) => Tab(text: c)).toList(),
+                ),
+              ),
             ),
           ),
         ],
@@ -184,20 +213,13 @@ class _CropsScreenState extends State<CropsScreen>
             ),
             const SizedBox(height: 16),
             const Text('Add New Crop', style: AppTheme.heading1),
-            const SizedBox(height: 12),
+            const SizedBox(height: 4),
             const Text(
-              'Firebase integration coming soon.\nConnect your google-services.json to save crops.',
-              textAlign: TextAlign.center,
+              'Track a new crop across your farm zones.',
               style: AppTheme.bodyLarge,
             ),
-            const SizedBox(height: 24),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Got It'),
-              ),
-            ),
+            const SizedBox(height: 20),
+            _AddCropForm(onClose: () => Navigator.pop(context)),
             const SizedBox(height: 20),
           ],
         ),
@@ -382,5 +404,243 @@ class _CropCard extends StatelessWidget {
           Text(label,
               style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary)),
         ],
+      );
+}
+
+// ── Add Crop Form ─────────────────────────────────────────────────────────────
+
+class _AddCropForm extends StatefulWidget {
+  final VoidCallback onClose;
+  const _AddCropForm({required this.onClose});
+
+  @override
+  State<_AddCropForm> createState() => _AddCropFormState();
+}
+
+class _AddCropFormState extends State<_AddCropForm> {
+  final _formKey = GlobalKey<FormState>();
+  final _nameCtrl = TextEditingController();
+  final _areaCtrl = TextEditingController();
+  final _notesCtrl = TextEditingController();
+  String _type = 'Cereal';
+  String _zone = 'Zone A';
+  String _waterNeed = 'Medium';
+  bool _saving = false;
+
+  final _types = ['Cereal', 'Vegetable', 'Root Crop', 'Fruit', 'Legume'];
+  final _zones = ['Zone A', 'Zone B', 'Zone C', 'Zone D', 'Zone E'];
+  final _waterNeeds = ['Low', 'Medium', 'High'];
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _areaCtrl.dispose();
+    _notesCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    if (!_formKey.currentState!.validate()) return;
+    setState(() => _saving = true);
+
+    final now = DateTime.now();
+    final harvestDate = DateTime(now.year, now.month + 4, now.day);
+    final crop = {
+      'name': _nameCtrl.text.trim(),
+      'type': _type,
+      'zone': _zone,
+      'area_hectares': double.tryParse(_areaCtrl.text.trim()) ?? 1.0,
+      'water_need': _waterNeed,
+      'health_status': 'good',
+      'health_percentage': 80,
+      'planted_date':
+          '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}',
+      'expected_harvest':
+          '${harvestDate.year}-${harvestDate.month.toString().padLeft(2, '0')}-${harvestDate.day.toString().padLeft(2, '0')}',
+      'growth_stage': 'Seedling',
+      'notes': _notesCtrl.text.trim(),
+    };
+
+    await context.read<AppProvider>().addCrop(crop);
+    if (!mounted) return;
+    setState(() => _saving = false);
+    widget.onClose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Form(
+      key: _formKey,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Crop Name
+          _label('Crop Name'),
+          const SizedBox(height: 5),
+          TextFormField(
+            controller: _nameCtrl,
+            textCapitalization: TextCapitalization.words,
+            decoration: _inputDec('e.g. Jasmine Rice', Icons.eco_outlined),
+            validator: (v) =>
+                v == null || v.trim().isEmpty ? 'Crop name is required' : null,
+          ),
+          const SizedBox(height: 12),
+
+          // Type + Zone row
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _label('Crop Type'),
+                    const SizedBox(height: 5),
+                    _dropdown(
+                      value: _type,
+                      items: _types,
+                      icon: Icons.category_outlined,
+                      onChanged: (v) => setState(() => _type = v!),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _label('Farm Zone'),
+                    const SizedBox(height: 5),
+                    _dropdown(
+                      value: _zone,
+                      items: _zones,
+                      icon: Icons.map_outlined,
+                      onChanged: (v) => setState(() => _zone = v!),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+
+          // Area + Water row
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _label('Area (hectares)'),
+                    const SizedBox(height: 5),
+                    TextFormField(
+                      controller: _areaCtrl,
+                      keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true),
+                      decoration:
+                          _inputDec('e.g. 2.5', Icons.landscape_outlined),
+                      validator: (v) {
+                        if (v == null || v.trim().isEmpty) return 'Required';
+                        if (double.tryParse(v.trim()) == null) {
+                          return 'Enter a number';
+                        }
+                        return null;
+                      },
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _label('Water Need'),
+                    const SizedBox(height: 5),
+                    _dropdown(
+                      value: _waterNeed,
+                      items: _waterNeeds,
+                      icon: Icons.water_drop_outlined,
+                      onChanged: (v) => setState(() => _waterNeed = v!),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+
+          // Notes
+          _label('Notes (optional)'),
+          const SizedBox(height: 5),
+          TextFormField(
+            controller: _notesCtrl,
+            maxLines: 2,
+            decoration:
+                _inputDec('Any observations...', Icons.notes_outlined),
+          ),
+          const SizedBox(height: 20),
+
+          // Save button
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: _saving ? null : _save,
+              icon: _saving
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Colors.white))
+                  : const Icon(Icons.check, size: 18),
+              label: Text(_saving ? 'Saving...' : 'Add Crop',
+                  style: const TextStyle(fontWeight: FontWeight.w700)),
+              style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 14)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _label(String text) => Text(
+        text,
+        style: const TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: AppTheme.textPrimary),
+      );
+
+  InputDecoration _inputDec(String hint, IconData icon) => InputDecoration(
+        hintText: hint,
+        prefixIcon: Icon(icon, color: AppTheme.textMuted, size: 18),
+        filled: true,
+        fillColor: AppTheme.backgroundLight,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide.none,
+        ),
+        contentPadding:
+            const EdgeInsets.symmetric(vertical: 11, horizontal: 14),
+      );
+
+  Widget _dropdown({
+    required String value,
+    required List<String> items,
+    required IconData icon,
+    required void Function(String?) onChanged,
+  }) =>
+      DropdownButtonFormField<String>(
+        value: value,
+        onChanged: onChanged,
+        decoration: _inputDec('', icon),
+        style: const TextStyle(
+            fontSize: 13,
+            color: AppTheme.textPrimary,
+            fontWeight: FontWeight.w500),
+        items: items
+            .map((e) => DropdownMenuItem(value: e, child: Text(e)))
+            .toList(),
       );
 }
